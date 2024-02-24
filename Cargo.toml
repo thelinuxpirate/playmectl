@@ -1,0 +1,9 @@
+[package]
+name = "playme"
+authors = ["TheLinuxPirate"]
+version = "0.0.9"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.1", features = ["derive"] }
+rodio = "0.17.3"

@@ -1,0 +1,10 @@
+#+title: PlayMe
+* Hello World!
+Playme is a small and minimal audio file player for unix machines.
+By using playme you can play a .mp3 or a .wav file and have that same audio continue looping.
+When running with the '&' symbol you can make this program run in the background.
+** Usage:
+#+begin_src
+
+
+#+end_src
