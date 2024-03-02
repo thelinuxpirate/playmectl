@@ -24,7 +24,10 @@ struct Args {
     doloop: u8,
 }
 
-fn file_exists(file_path: &str) -> bool { metadata(file_path).is_ok() }
+fn file_exists(file_path: &str) -> bool {
+    metadata(file_path).is_ok()
+}
+
 fn play_audio(file_path: &str, loop_enabled: bool) {
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
     let sink = Sink::try_new(&stream_handle).unwrap();
@@ -35,13 +38,10 @@ fn play_audio(file_path: &str, loop_enabled: bool) {
     if loop_enabled {
         // if user wants a loop create a looped version of the source
         let infinite_source = source.repeat_infinite();
-        thread::sleep(Duration::from_secs(1));
-        println!("playme: looping");
+        sink.append(infinite_source);
         loop {
-            sink.append(infinite_source.clone());
-            if sink.empty() {
-                thread::sleep(Duration::from_secs(5));
-            }
+            sink.sleep_until_end();
+            thread::sleep(Duration::from_secs(3));
         }
     } else {
         // if not looping, wait for the audio to finish playing
@@ -49,7 +49,7 @@ fn play_audio(file_path: &str, loop_enabled: bool) {
         thread::sleep(Duration::from_secs(10));
         println!("playme: completed...");
     }
-    
+   
     sink.stop();
 }
 
