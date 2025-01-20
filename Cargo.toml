@@ -1,9 +1,12 @@
 [package]
-name = "playme"
-authors = ["TheLinuxPirate"]
-version = "0.1.0"
+name = "playmectl"
+authors = ["TRONG"]
+version = "0.1.5"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.5.1", features = ["derive"] }
-rodio = "0.17.3"
+clap  = { version = "4.5.1", features = [ "derive" ] }
+daemonize = "0.5.0"
+rodio = { version = "0.20.1", features = [ "noise", "tracing" ] }
+# might not need a config
+#toml  = "0.8.19"
