@@ -7,10 +7,9 @@ use rodio::{
     Decoder
 };
 use std::{
-    fs::{ File, create_dir_all, metadata },
-    io::{ Error, Write },
-    os::unix::net::{ UnixListener, UnixStream },
-    sync::{ Arc, Mutex },
+    fs::{ File, create_dir_all, metadata, read_to_string },
+    io::{ BufReader, Write },
+//    sync::{ Arc, Mutex },
     env::var,
     path::PathBuf,
     time::Duration,
@@ -18,32 +17,94 @@ use std::{
 };
 
 // TODO:
-// daemonize command
 // Add playlist feature
 // Add indexing crate
 // update mpd controls
-// play-pause
+// add libnotify options
+// add manual queuing with -t & -c (rodio 'append')
 // -t can queue song & change song
 
 /// Plays songs in the background of your desktop
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Song filepath
+    /// Playlist/Song filepath
     #[arg(short, long, default_value = "")]
     title: String,
 
-    /// Playlist path/title
-    #[arg(short, long, default_value = "")]
-    playlist: String,
-
-    /// 1 = Play, 2 = Pause, 3 = Stop, 4 = Change song, 5 = Queue song
+    /// 1 = play/pause, 2 = kill, 3 = loop,  4 = Change song, 5 = Queue song
     #[arg(short, long, default_value_t = 0)] // if 0 do nothing
     command: u8,
 
-    /// 1 = Loop; 0 = No Loop
-    #[arg(short, long, default_value_t = 0)]
-    _loop: u8
+    /// View currently playing song
+    #[arg(short, long)]
+    view: bool
+}
+
+struct AudioManager {
+    sink: Sink
+}
+
+impl AudioManager {
+    fn new() -> Self {
+        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+        let sink = Sink::try_new(&stream_handle).unwrap();
+        AudioManager { sink }
+    }
+
+    fn manage_audio(&self, path_type: Option<u8>, file_path: &str, cmd: u8) {
+        let song = File::open(file_path).unwrap();
+        let source = Decoder::new(BufReader::new(song)).unwrap();
+
+        update_currently_playing(file_path);
+
+        match path_type {
+            Some(1) => {
+                if cmd == 3 {
+                    let infinite_source = source.repeat_infinite();
+                    self.sink.append(infinite_source);
+                    loop {
+                        self.sink.sleep_until_end();
+                        thread::sleep(Duration::from_secs(3));
+                    }
+                } else {
+                    self.sink.append(source);
+                    while !self.sink.empty() {
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    println!("playmectl: {} has completed...", file_path);
+                }
+
+                self.sink.stop();
+                update_currently_playing("");
+            }
+
+            Some(2) => { // PlayList code :)
+                // Implement playlist handling here
+            }
+
+            _ => eprintln!("Now how did we get here?"),
+        }
+
+        match cmd {
+            1 => {
+                if self.sink.is_paused() {
+                    self.sink.play();
+                    println!("Resumed");
+                } else {
+                    self.sink.pause();
+                    println!("Paused");
+                }
+            }
+
+            2 => {
+                self.sink.stop();
+                println!("Process has been killed");
+            }
+
+            _ => println!("Unknown command given\nPlease read the 'man' page"),
+        }
+    }
 }
 
 fn daemonize() -> bool {
@@ -69,90 +130,74 @@ fn daemonize() -> bool {
     }
 }
 
-fn event_handler() {}
-
-fn filepath_exists(file_path: &str) -> u8 {
+fn filepath_exists(file_path: &str) -> Option<u8> {
     if let Ok(meta) = metadata(file_path) {
         if meta.is_file() {
-            return 1;
+            return Some(1);
         } else if meta.is_dir() {
-            return 2;
+            return Some(2);
         }
     }
 
-    0
+    Some(0)
 }
 
-fn manage_audio(current_song: &mut Sink, opt: u8) {
-    match opt {
-        0 => { // play/pause
-            if current_song.is_paused() {
-                current_song.play();
-                println!("Resumed");
-            } else {
-                current_song.pause();
-                println!("Paused");
-            }
-        }
+fn update_currently_playing(song: &str) {
+    let homedir = var("HOME").expect("Could not find $HOME environment variable");
+    let playmedir = PathBuf::from(format!("{}/.local/share/playmectl/", homedir));
+    let state_file = playmedir.join("currently_playing.txt");
 
-        1 => { // Manual Queue
-
-        }
-
-        _ => println!("ERROR")
-    }
+    let mut file = File::create(state_file).expect("Could not create state file");
+    writeln!(file, "{}", song).expect("Could not write to state file");
 }
 
-fn play_audio(path_type: u8, file_path: &str, _loop: u8) {
-    match path_type {
-        1 => {
-            let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-            let sink = Sink::try_new(&stream_handle).unwrap();
+fn get_currently_playing() -> Option<String> {
+    let homedir = var("HOME").expect("Could not find $HOME environment variable");
+    let playmedir = PathBuf::from(format!("{}/.local/share/playmectl/", homedir));
+    let state_file = playmedir.join("currently_playing.txt");
 
-            let song = std::fs::File::open(file_path).unwrap();
-            let source = Decoder::new(std::io::BufReader::new(song)).unwrap();
-
-            if _loop == 1 {
-                let infinite_source = source.repeat_infinite();
-                sink.append(infinite_source);
-                loop {
-                    sink.sleep_until_end();
-                    thread::sleep(Duration::from_secs(3));
-                }
-            } else {
-                sink.append(source);
-                while !sink.empty() {
-                    thread::sleep(Duration::from_millis(100));
-                }
-                println!("playmectl: {} has completed...", file_path);
-            }
-
-            sink.stop();
+    if let Ok(contents) = read_to_string(state_file) {
+        let path = PathBuf::from(contents.trim());
+        if let Some(filename) = path.file_name() {
+            return Some(filename.to_string_lossy().to_string());
         }
-
-        2 => { // PlayList code :)
-
-        }
-
-        _ => eprintln!("ERROR")
     }
+    None
 }
 
 fn main() {
-    daemonize();
     let args = Args::parse();
 
+    if args.view {
+        if let Some(current_song) = get_currently_playing() {
+            if current_song.is_empty() {
+                eprintln!("There is nothing currently playing!\nTry using the -t command");
+            } else {
+                println!("Currently playing: '{}'", current_song);
+            }
+        } else {
+            eprintln!("Failed to retrieve currently playing song");
+        }
+        return;
+    }
+
     if !args.title.is_empty() {
-        let path_result: u8 = filepath_exists(args.title.as_str());
-        if path_result != 0 {
-            play_audio(path_result, &args.title, args._loop);
+        let path_result = filepath_exists(args.title.as_str());
+        if path_result != Some(0) {
+            // queuing logic would go HERE
+
+
+            daemonize();
+            let audio_manager = AudioManager::new(); // logic error?
+            audio_manager.manage_audio(Some(path_result).expect("Failed to read path"), &args.title, args.command);
         } else {
             eprintln!("File '{}' does not exist.", args.title);
         }
     }
 
-    if !args.playlist.is_empty() {
-        println!("{}", args.playlist);
+    if args.command != 0 {
+        let audio_manager = AudioManager::new();
+        audio_manager.manage_audio(None, &args.title, args.command);
     }
 
     eprintln!("Incorrect arguments supplied\nPlease try again");
