@@ -1,5 +1,14 @@
 use clap::Parser;
-use daemonize::Daemonize;
+use playmectl::{
+    daemon::{
+        daemonize,
+        start_socket,
+        socket_manager
+    },
+    get_currently_playing,
+    update_currently_playing,
+    DirData
+};
 use rodio::{
     Sink,
     OutputStream,
@@ -7,12 +16,9 @@ use rodio::{
     Decoder
 };
 use std::{
-    fs::{ File, create_dir_all, metadata, read_to_string },
-    io::{ BufReader, Write },
-//    sync::{ Arc, Mutex },
-    env::var,
-    path::PathBuf,
     time::Duration,
+    io::BufReader,
+    fs::File,
     thread,
 };
 
@@ -38,131 +44,99 @@ struct Args {
 
     /// View currently playing song
     #[arg(short, long)]
-    view: bool
+    view: bool,
+
+    /// test me
+    #[arg(short, long, default_value_t = 0)]
+    demo: u8
+
 }
 
 struct AudioManager {
-    sink: Sink
+    sink: Sink,
+    status: bool
 }
 
 impl AudioManager {
     fn new() -> Self {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
         let sink = Sink::try_new(&stream_handle).unwrap();
-        AudioManager { sink }
+        let status = true;
+        AudioManager { sink, status }
     }
 
-    fn manage_audio(&self, path_type: Option<u8>, file_path: &str, cmd: u8) {
-        let song = File::open(file_path).unwrap();
-        let source = Decoder::new(BufReader::new(song)).unwrap();
+    fn get_status(am: AudioManager) -> bool {
+        if am.status == false {
+            false
+        } else {
+            true
+        }
+    }
+}
 
-        update_currently_playing(file_path);
+fn manage_audio(am: AudioManager, path_type: Option<u8>, file_path: &str, cmd: u8) {
+    let song = File::open(file_path).unwrap();
+    let source = Decoder::new(BufReader::new(song)).unwrap();
 
-        match path_type {
-            Some(1) => {
-                if cmd == 3 {
-                    let infinite_source = source.repeat_infinite();
-                    self.sink.append(infinite_source);
-                    loop {
-                        self.sink.sleep_until_end();
-                        thread::sleep(Duration::from_secs(3));
-                    }
-                } else {
-                    self.sink.append(source);
-                    while !self.sink.empty() {
-                        thread::sleep(Duration::from_millis(100));
-                    }
-                    println!("playmectl: {} has completed...", file_path);
+    update_currently_playing(file_path);
+
+    match path_type {
+        Some(1) => {
+            if cmd == 3 {
+                let infinite_source = source.repeat_infinite();
+                am.sink.append(infinite_source);
+                loop {
+                    am.sink.sleep_until_end();
+                    thread::sleep(Duration::from_secs(3));
                 }
-
-                self.sink.stop();
-                update_currently_playing("");
-            }
-
-            Some(2) => { // PlayList code :)
-                // Implement playlist handling here
-            }
-
-            _ => eprintln!("Now how did we get here?"),
-        }
-
-        match cmd {
-            1 => {
-                if self.sink.is_paused() {
-                    self.sink.play();
-                    println!("Resumed");
-                } else {
-                    self.sink.pause();
-                    println!("Paused");
+            } else {
+                am.sink.append(source);
+                while !am.sink.empty() {
+                    thread::sleep(Duration::from_millis(100));
                 }
+                println!("playmectl: {} has completed...", file_path);
             }
 
-            2 => {
-                self.sink.stop();
-                println!("Process has been killed");
+            am.sink.stop();
+            update_currently_playing("");
+        }
+
+        Some(2) => { // PlayList code :)
+            // Implement playlist handling here
+        }
+
+        _ => eprintln!("Now how did we get here?"),
+    }
+
+    match cmd {
+        1 => {
+            if am.sink.is_paused() {
+                am.sink.play();
+                println!("Resumed");
+            } else {
+                am.sink.pause();
+                println!("Paused");
             }
-
-            _ => println!("Unknown command given\nPlease read the 'man' page"),
         }
-    }
-}
 
-fn daemonize() -> bool {
-    let homedir = var("HOME").expect("Could not find $HOME environment variable");
-    let playmedir = PathBuf::from(format!("{}/.local/share/playmectl/", homedir));
-
-    if !playmedir.exists() {
-        create_dir_all(&playmedir).expect("Failed to create playmectl directory");
-    }
-
-    let stdout = File::create(playmedir.join("daemon.out")).unwrap();
-    let stderr = File::create(playmedir.join("daemon.err")).unwrap();
-
-    let daemonize = Daemonize::new()
-        .pid_file(playmedir.join("playmectl.pid"))
-        .working_directory(playmedir)
-        .stdout(stdout)
-        .stderr(stderr);
-
-    match daemonize.start() {
-        Ok(_) => true,
-        Err(_) => false,
-    }
-}
-
-fn filepath_exists(file_path: &str) -> Option<u8> {
-    if let Ok(meta) = metadata(file_path) {
-        if meta.is_file() {
-            return Some(1);
-        } else if meta.is_dir() {
-            return Some(2);
+        2 => {
+            am.sink.stop();
+            println!("Process has been killed");
         }
-    }
 
-    Some(0)
+        _ => println!("Unknown command given\nPlease read the 'man' page"),
+    }
 }
 
-fn update_currently_playing(song: &str) {
-    let homedir = var("HOME").expect("Could not find $HOME environment variable");
-    let playmedir = PathBuf::from(format!("{}/.local/share/playmectl/", homedir));
-    let state_file = playmedir.join("currently_playing.txt");
+fn send_cmd(cmd: u8) {
+    match cmd {
 
-    let mut file = File::create(state_file).expect("Could not create state file");
-    writeln!(file, "{}", song).expect("Could not write to state file");
-}
 
-fn get_currently_playing() -> Option<String> {
-    let homedir = var("HOME").expect("Could not find $HOME environment variable");
-    let playmedir = PathBuf::from(format!("{}/.local/share/playmectl/", homedir));
-    let state_file = playmedir.join("currently_playing.txt");
 
-    if let Ok(contents) = read_to_string(state_file) {
-        let path = PathBuf::from(contents.trim());
-        if let Some(filename) = path.file_name() {
-            return Some(filename.to_string_lossy().to_string());
-        }
+        _ => println!("fuck"),
     }
-    None
+
+
 }
 
 fn main() {
@@ -182,14 +156,11 @@ fn main() {
     }
 
     if !args.title.is_empty() {
-        let path_result = filepath_exists(args.title.as_str());
+        let path_result = DirData::filepath_exists(args.title.as_str());
         if path_result != Some(0) {
-            // queuing logic would go HERE
-
-
             daemonize();
-            let audio_manager = AudioManager::new(); // logic error?
-            audio_manager.manage_audio(Some(path_result).expect("Failed to read path"), &args.title, args.command);
+            let audio_manager = AudioManager::new();
+            manage_audio(audio_manager, Some(path_result).expect("Failed to read path"), &args.title, args.command);
         } else {
             eprintln!("File '{}' does not exist.", args.title);
         }
@@ -197,7 +168,19 @@ fn main() {
 
     if args.command != 0 {
         let audio_manager = AudioManager::new();
-        audio_manager.manage_audio(None, &args.title, args.command);
+        manage_audio(audio_manager, None, &args.title, args.command);
+    }
+
+    if args.demo != 0 {
+        daemonize();
+        match start_socket() {
+            Ok(listener) => {
+                if let Err(e) = socket_manager(listener) {
+                    eprintln!("Socket manager error: {}", e);
+                }
+            }
+            Err(e) => eprintln!("Failed to start socket: {}", e),
+        }
     }
 
     eprintln!("Incorrect arguments supplied\nPlease try again");
