@@ -16,17 +16,18 @@ use rodio::{
 pub mod daemon;
 
 pub struct AudioManager {
+    pub track: String,
     pub _stream: OutputStream,
     pub sink: Sink,
     pub status: bool
 }
 
 impl AudioManager {
-    pub fn new() -> Self {
+    pub fn new(track: String) -> Self {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
         let sink = Sink::try_new(&stream_handle).unwrap();
         let status = true;
-        AudioManager { _stream, sink, status }
+        AudioManager { track, _stream, sink, status }
     }
 
     pub fn get_status(am: AudioManager) -> bool {
@@ -39,9 +40,8 @@ impl AudioManager {
 }
 
 pub struct DirData {
-    homedir: String,
     playmedir: PathBuf,
-    socket_path: PathBuf,
+    pub socket_path: PathBuf,
     state_file: PathBuf
 }
 
@@ -53,18 +53,11 @@ impl DirData {
         let state_file = playmedir.join("currently_playing.txt");
 
         Self {
-            homedir,
             playmedir,
             socket_path,
             state_file
         }
     }
-
-    // pub fn ensure_directories(&self) {
-    //     if !self.playmedir.exists() {
-    //         create_dir_all(&self.playmedir).expect("Failed to create playmectl directory");
-    //     }
-    // }
 
     pub fn filepath_exists(file_path: &str) -> Option<u8> {
         if let Ok(meta) = metadata(file_path) {

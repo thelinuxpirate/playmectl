@@ -6,19 +6,13 @@ use playmectl::{
         socket_manager
     },
     get_currently_playing,
-    update_currently_playing,
     AudioManager,
     DirData
 };
-use rodio::{
-    Source,
-    Decoder
-};
 use std::{
-    time::Duration,
-    io::BufReader,
-    fs::File,
-    thread,
+    io::Write,
+    os::unix::net::UnixStream,
+    process::exit,
 };
 
 // TODO:
@@ -32,7 +26,7 @@ use std::{
 /// Plays songs in the background of your desktop
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct Args {
+pub struct Args {
     /// Playlist/Song filepath
     #[arg(short, long, default_value = "")]
     title: String,
@@ -45,115 +39,54 @@ struct Args {
     #[arg(short, long)]
     view: bool,
 
-    /// test me
-    #[arg(short, long, default_value_t = 0)]
-    demo: u8
-
 }
 
-fn manage_audio(am: AudioManager, path_type: Option<u8>, file_path: &str, cmd: u8) {
-    let song = File::open(file_path).unwrap();
-    let source = Decoder::new(BufReader::new(song)).unwrap();
-
-    update_currently_playing(file_path);
-
-    match path_type {
-        Some(1) => {
-            if cmd == 3 {
-                let infinite_source = source.repeat_infinite();
-                am.sink.append(infinite_source);
-                loop {
-                    am.sink.sleep_until_end();
-                    thread::sleep(Duration::from_secs(3));
-                }
-            } else {
-                am.sink.append(source);
-                while !am.sink.empty() {
-                    thread::sleep(Duration::from_millis(100));
-                }
-                println!("playmectl: {} has completed...", file_path);
-            }
-
-            am.sink.stop();
-            update_currently_playing("");
-        }
-
-        Some(2) => { // PlayList code :)
-            // Implement playlist handling here
-        }
-
-        _ => eprintln!("Now how did we get here?"),
+fn send_cmd(command: &str) {
+    let dirs = DirData::new();
+    if let Ok(mut stream) = UnixStream::connect(&dirs.socket_path) {
+        stream.write_all(command.as_bytes()).unwrap();
+    } else {
+        eprintln!("Error: Daemon is not running. Start with `-t <song>`");
+        exit(1);
     }
-
-    match cmd {
-        1 => {
-            if am.sink.is_paused() {
-                am.sink.play();
-                println!("Resumed");
-            } else {
-                am.sink.pause();
-                println!("Paused");
-            }
-        }
-
-        2 => {
-            am.sink.stop();
-            println!("Process has been killed");
-        }
-
-        _ => println!("Unknown command given\nPlease read the 'man' page"),
-    }
-}
-
-fn send_cmd(cmd: u8) {
-    match cmd {
-
-
-
-        _ => println!("fuck"),
-    }
-
-
 }
 
 fn main() {
     let args = Args::parse();
+    let dirs = DirData::new();
 
+    // View currently playing song
     if args.view {
         if let Some(current_song) = get_currently_playing() {
             if current_song.is_empty() {
-                eprintln!("There is nothing currently playing!\nTry using the -t command");
+                eprintln!("Nothing is currently playing.");
             } else {
-                println!("Currently playing: '{}'", current_song);
+                println!("Currently playing: {}", current_song);
             }
-        } else {
-            eprintln!("Failed to retrieve currently playing song");
         }
         return;
     }
 
-    if !args.title.is_empty() {
-        let path_result = DirData::filepath_exists(args.title.as_str());
-        if path_result != Some(0) {
-            daemonize();
-            let audio_manager = AudioManager::new();
-            manage_audio(audio_manager, Some(path_result).expect("Failed to read path"), &args.title, args.command);
-        } else {
-            eprintln!("File '{}' does not exist.", args.title);
+    // Check if daemon is already running (socket exists)
+    if dirs.socket_path.exists() {
+        match args.command {
+            0 => send_cmd("append"),
+            1 => send_cmd("pause"),
+            2 => send_cmd("stop"),
+            3 => send_cmd("play"),
+            _ => eprintln!("Unknown command."),
         }
+        return;
     }
 
-    if args.command != 0 {
-        let audio_manager = AudioManager::new();
-        manage_audio(audio_manager, None, &args.title, args.command);
-    }
-
-    if args.demo != 0 { // socket stuff in my demo command (hasnt been implemented in my MAIN program)
+    // If no socket, start the daemon
+    if !args.title.is_empty() {
         daemonize();
-        let mut am = AudioManager::new();
+        let mut audio_manager = AudioManager::new(args.title);
+
         match start_socket() {
             Ok(listener) => {
-                if let Err(e) = socket_manager(listener, &mut am) {
+                if let Err(e) = socket_manager(listener, &mut audio_manager) {
                     eprintln!("Socket manager error: {}", e);
                 }
             }
@@ -161,5 +94,5 @@ fn main() {
         }
     }
 
-    eprintln!("Incorrect arguments supplied\nPlease try again");
+    eprintln!("Invalid arguments. Try using `-t <song>` or `-c <command>`");
 }
