@@ -1,9 +1,24 @@
-use crate::DirData;
+use crate::{
+    AudioManager,
+    DirData
+};
 use daemonize::Daemonize;
 use std::{
-    os::unix::net::{ UnixListener, UnixStream },
-    io::{ Read, Write, Error },
-    fs::{ create_dir_all, metadata, remove_file, File },
+    os::unix::net::{
+        UnixListener,
+        UnixStream
+    },
+    io::{
+        Read,
+        Write,
+        Error
+    },
+    fs::{
+        create_dir_all,
+        metadata,
+        remove_file,
+        File
+    },
 };
 
 pub fn daemonize() -> bool {
@@ -42,13 +57,25 @@ pub fn start_socket() -> Result<UnixListener, Error> {
     Ok(listener)
 }
 
-pub fn socket_manager(listener: UnixListener) -> std::io::Result<()> {
+pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager) -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                println!("Client connected!");
-                if let Err(e) = handle_client(&mut stream) {
-                    eprintln!("Client handling error: {}", e);
+                let mut buffer = [0; 128];
+                let size = stream.read(&mut buffer)?;
+
+                if size == 0 {
+                    return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Client disconnected"));
+                }
+
+                let message = String::from_utf8_lossy(&buffer[..size]).trim().to_string();
+                println!("Received command: {}", message);
+
+                match message.as_str() {
+                    "play" => audio_manager.sink.play(),
+                    "pause" => audio_manager.sink.pause(),
+                    "stop" => audio_manager.sink.stop(),
+                    _ => eprintln!("Unknown command: {}", message),
                 }
             }
             Err(err) => eprintln!("Connection failed: {}", err),
@@ -56,6 +83,7 @@ pub fn socket_manager(listener: UnixListener) -> std::io::Result<()> {
     }
     Ok(())
 }
+
 
 
 pub fn handle_client(stream: &mut UnixStream) -> std::io::Result<()> {

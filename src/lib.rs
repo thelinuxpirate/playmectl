@@ -2,15 +2,41 @@ use std::{
     fs::{
         File,
         metadata,
-        create_dir_all,
         read_to_string
     },
     path::PathBuf,
     io::Write,
     env::var,
 };
+use rodio::{
+    Sink,
+    OutputStream,
+};
 
 pub mod daemon;
+
+pub struct AudioManager {
+    pub _stream: OutputStream,
+    pub sink: Sink,
+    pub status: bool
+}
+
+impl AudioManager {
+    pub fn new() -> Self {
+        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+        let sink = Sink::try_new(&stream_handle).unwrap();
+        let status = true;
+        AudioManager { _stream, sink, status }
+    }
+
+    pub fn get_status(am: AudioManager) -> bool {
+        if am.status == false {
+            false
+        } else {
+            true
+        }
+    }
+}
 
 pub struct DirData {
     homedir: String,
@@ -34,11 +60,11 @@ impl DirData {
         }
     }
 
-    pub fn ensure_directories(&self) {
-        if !self.playmedir.exists() {
-            create_dir_all(&self.playmedir).expect("Failed to create playmectl directory");
-        }
-    }
+    // pub fn ensure_directories(&self) {
+    //     if !self.playmedir.exists() {
+    //         create_dir_all(&self.playmedir).expect("Failed to create playmectl directory");
+    //     }
+    // }
 
     pub fn filepath_exists(file_path: &str) -> Option<u8> {
         if let Ok(meta) = metadata(file_path) {

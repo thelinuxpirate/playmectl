@@ -7,11 +7,10 @@ use playmectl::{
     },
     get_currently_playing,
     update_currently_playing,
+    AudioManager,
     DirData
 };
 use rodio::{
-    Sink,
-    OutputStream,
     Source,
     Decoder
 };
@@ -50,28 +49,6 @@ struct Args {
     #[arg(short, long, default_value_t = 0)]
     demo: u8
 
-}
-
-struct AudioManager {
-    sink: Sink,
-    status: bool
-}
-
-impl AudioManager {
-    fn new() -> Self {
-        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-        let sink = Sink::try_new(&stream_handle).unwrap();
-        let status = true;
-        AudioManager { sink, status }
-    }
-
-    fn get_status(am: AudioManager) -> bool {
-        if am.status == false {
-            false
-        } else {
-            true
-        }
-    }
 }
 
 fn manage_audio(am: AudioManager, path_type: Option<u8>, file_path: &str, cmd: u8) {
@@ -171,11 +148,12 @@ fn main() {
         manage_audio(audio_manager, None, &args.title, args.command);
     }
 
-    if args.demo != 0 {
+    if args.demo != 0 { // socket stuff in my demo command (hasnt been implemented in my MAIN program)
         daemonize();
+        let mut am = AudioManager::new();
         match start_socket() {
             Ok(listener) => {
-                if let Err(e) = socket_manager(listener) {
+                if let Err(e) = socket_manager(listener, &mut am) {
                     eprintln!("Socket manager error: {}", e);
                 }
             }
