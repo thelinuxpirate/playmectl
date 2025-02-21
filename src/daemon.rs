@@ -1,11 +1,29 @@
-use crate::{AudioManager, DirData};
+use crate::{
+    AudioManager,
+    DirData
+};
 use daemonize::Daemonize;
 use rodio::Decoder;
 use std::{
-    fs::{create_dir_all, metadata, remove_file, File},
-    io::{Read, BufReader},
-    os::unix::net::UnixListener,
-    process::exit,
+    fs::{
+        create_dir_all,
+        read_to_string,
+        remove_file,
+        metadata,
+        File
+    },
+    io::{
+        ErrorKind,
+        BufReader,
+        Result,
+        Error,
+        Read
+    },
+    process::{
+        Command,
+        exit
+    },
+    os::unix::net::UnixListener
 };
 
 pub fn daemonize() {
@@ -29,7 +47,7 @@ pub fn daemonize() {
     }
 }
 
-pub fn start_socket() -> std::io::Result<UnixListener> {
+pub fn start_socket() -> Result<UnixListener> {
     let dirs = DirData::new();
 
     if metadata(&dirs.socket_path).is_ok() {
@@ -44,7 +62,20 @@ pub fn start_socket() -> std::io::Result<UnixListener> {
 pub fn socket_manager(
     listener: UnixListener,
     audio_manager: &mut AudioManager,
-) -> std::io::Result<()> {
+) -> Result<()> {
+    if !audio_manager.track.is_empty() {
+        match File::open(&audio_manager.track) {
+            Ok(song) => {
+                let source = Decoder::new(BufReader::new(song)).unwrap();
+                audio_manager.sink.append(source);
+                audio_manager.sink.play();
+            }
+            Err(err) => {
+                eprintln!("Failed to open file: {}", err);
+            }
+        }
+    }
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
@@ -52,7 +83,7 @@ pub fn socket_manager(
                 let size = stream.read(&mut buffer)?;
 
                 if size == 0 {
-                    return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Client disconnected"));
+                    return Err(Error::new(ErrorKind::UnexpectedEof, "Client disconnected"));
                 }
 
                 let message = String::from_utf8_lossy(&buffer[..size]).trim().to_string();
@@ -64,16 +95,40 @@ pub fn socket_manager(
                             Ok(song) => {
                                 let source = Decoder::new(BufReader::new(song)).unwrap();
                                 audio_manager.sink.append(source);
-                                println!("HERE");
                             }
                             Err(err) => {
                                 eprintln!("Failed to open file: {}", err);
                             }
                         }
                     },
-                    "play" => audio_manager.sink.play(),
-                    "pause" => audio_manager.sink.pause(),
-                    "stop" => audio_manager.sink.stop(),
+                    "toggle_play" => {
+                        if audio_manager.sink.is_paused() {
+                            audio_manager.sink.play();
+                        } else {
+                            audio_manager.sink.pause();
+                        }
+                    },
+                    "stop" => {
+                        let dirs = DirData::new();
+
+                        if metadata(&dirs.socket_path).is_ok() {
+                            remove_file(&dirs.socket_path).unwrap();
+                        }
+
+                        if let Ok(pid) = read_to_string(&dirs.pid_file) {
+                            let pid = pid.trim();
+                            if let Ok(_) = Command::new("kill").arg(pid).status() {
+                                println!("Daemon has been killed.");
+                                remove_file(&dirs.pid_file).expect("Failed to remove PID file.");
+                            } else {
+                                eprintln!("Failed to kill daemon.");
+                            }
+                        } else {
+                            eprintln!("Daemon is not running or PID file is missing.");
+                        }
+
+                        audio_manager.sink.stop();
+                    },
                     _ => eprintln!("Unknown command"),
                 }
             }

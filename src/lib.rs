@@ -19,30 +19,21 @@ pub struct AudioManager {
     pub track: String,
     pub _stream: OutputStream,
     pub sink: Sink,
-    pub status: bool
 }
 
 impl AudioManager {
     pub fn new(track: String) -> Self {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
         let sink = Sink::try_new(&stream_handle).unwrap();
-        let status = true;
-        AudioManager { track, _stream, sink, status }
-    }
-
-    pub fn get_status(am: AudioManager) -> bool {
-        if am.status == false {
-            false
-        } else {
-            true
-        }
+        AudioManager { track, _stream, sink }
     }
 }
 
 pub struct DirData {
     playmedir: PathBuf,
     pub socket_path: PathBuf,
-    state_file: PathBuf
+    state_file: PathBuf,
+    pub pid_file: PathBuf
 }
 
 impl DirData {
@@ -51,11 +42,13 @@ impl DirData {
         let playmedir = PathBuf::from(format!("{}/.local/share/playmectl/", homedir));
         let socket_path = PathBuf::from(format!("{}/.local/share/playmectl/playme.socket", homedir));
         let state_file = playmedir.join("currently_playing.txt");
+        let pid_file = playmedir.join("playmectl.pid");
 
         Self {
             playmedir,
             socket_path,
-            state_file
+            state_file,
+            pid_file
         }
     }
 

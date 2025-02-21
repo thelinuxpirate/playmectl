@@ -10,9 +10,9 @@ use playmectl::{
     DirData
 };
 use std::{
-    io::Write,
     os::unix::net::UnixStream,
     process::exit,
+    io::Write,
 };
 
 // TODO:
@@ -32,7 +32,7 @@ pub struct Args {
     title: String,
 
     /// 1 = play/pause, 2 = kill, 3 = loop,  4 = Change song, 5 = Queue song
-    #[arg(short, long, default_value_t = 0)] // if 0 do nothing
+    #[arg(short, long, default_value_t = 0)]
     command: u8,
 
     /// View currently playing song
@@ -55,7 +55,6 @@ fn main() {
     let args = Args::parse();
     let dirs = DirData::new();
 
-    // View currently playing song
     if args.view {
         if let Some(current_song) = get_currently_playing() {
             if current_song.is_empty() {
@@ -67,19 +66,17 @@ fn main() {
         return;
     }
 
-    // Check if daemon is already running (socket exists)
     if dirs.socket_path.exists() {
         match args.command {
             0 => send_cmd("append"),
-            1 => send_cmd("pause"),
+            1 => send_cmd("toggle_play"),
             2 => send_cmd("stop"),
-            3 => send_cmd("play"),
+            3 => send_cmd("infinite"),
             _ => eprintln!("Unknown command."),
         }
         return;
     }
 
-    // If no socket, start the daemon
     if !args.title.is_empty() {
         daemonize();
         let mut audio_manager = AudioManager::new(args.title);
