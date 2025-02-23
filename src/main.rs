@@ -38,11 +38,11 @@ pub struct Args {
     /// View currently playing song
     #[arg(short, long)]
     view: bool,
-
 }
 
 fn send_cmd(command: &str) {
     let dirs = DirData::new();
+
     if let Ok(mut stream) = UnixStream::connect(&dirs.socket_path) {
         stream.write_all(command.as_bytes()).unwrap();
     } else {
@@ -67,11 +67,15 @@ fn main() {
     }
 
     if dirs.socket_path.exists() {
+        if !args.title.is_empty() {
+            send_cmd(&format!("change_track {}", args.title));
+        }
+
         match args.command {
             0 => send_cmd("append"),
             1 => send_cmd("toggle_play"),
-            2 => send_cmd("stop"),
-            3 => send_cmd("infinite"),
+            2 => send_cmd("kill"),
+            3 => send_cmd("make_infinite"),
             _ => eprintln!("Unknown command."),
         }
         return;
@@ -91,5 +95,5 @@ fn main() {
         }
     }
 
-    eprintln!("Invalid arguments. Try using `-t <song>` or `-c <command>`");
+    eprintln!("Invalid arguments. Try using `-h`, `-t <song>`, or `-c <command>`");
 }

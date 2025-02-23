@@ -19,13 +19,23 @@ pub struct AudioManager {
     pub track: String,
     pub _stream: OutputStream,
     pub sink: Sink,
+    pub status: bool
 }
 
 impl AudioManager {
     pub fn new(track: String) -> Self {
         let (_stream, stream_handle) = OutputStream::try_default().unwrap();
         let sink = Sink::try_new(&stream_handle).unwrap();
-        AudioManager { track, _stream, sink }
+        let status = true;
+        AudioManager { track, _stream, sink, status }
+    }
+
+    pub fn get_status(am: &Self) -> bool {
+        if am.sink.empty() {
+            true
+        } else {
+           false
+        }
     }
 }
 

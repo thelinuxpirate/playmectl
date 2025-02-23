@@ -1,9 +1,11 @@
 use crate::{
-    AudioManager,
-    DirData
+    update_currently_playing, AudioManager, DirData
 };
 use daemonize::Daemonize;
-use rodio::Decoder;
+use rodio::{
+    Decoder,
+    Source
+};
 use std::{
     fs::{
         create_dir_all,
@@ -69,6 +71,7 @@ pub fn socket_manager(
                 let source = Decoder::new(BufReader::new(song)).unwrap();
                 audio_manager.sink.append(source);
                 audio_manager.sink.play();
+                update_currently_playing(&audio_manager.track);
             }
             Err(err) => {
                 eprintln!("Failed to open file: {}", err);
@@ -95,10 +98,24 @@ pub fn socket_manager(
                             Ok(song) => {
                                 let source = Decoder::new(BufReader::new(song)).unwrap();
                                 audio_manager.sink.append(source);
+                                audio_manager.sink.play();
+                                update_currently_playing(&audio_manager.track);
                             }
                             Err(err) => {
                                 eprintln!("Failed to open file: {}", err);
                             }
+                        }
+                    },
+                    cmd if cmd.starts_with("change_track ") => {
+                        let new_track = cmd.strip_prefix("change_track ").unwrap();
+                        if let Ok(song) = File::open(new_track) {
+                            audio_manager.sink.stop();
+                            let source = Decoder::new(BufReader::new(song)).unwrap();
+                            audio_manager.sink.append(source);
+                            audio_manager.track = new_track.to_string();
+                            update_currently_playing(new_track);
+                        } else {
+                            eprintln!("Failed to open file: {}", new_track);
                         }
                     },
                     "toggle_play" => {
@@ -108,7 +125,21 @@ pub fn socket_manager(
                             audio_manager.sink.pause();
                         }
                     },
-                    "stop" => {
+                    "make_infinite" => {
+                        match File::open(&audio_manager.track) {
+                            Ok(song) => {
+                                let source = Decoder::new(BufReader::new(song)).unwrap();
+                                let infinite_source = source.repeat_infinite();
+                                audio_manager.sink.append(infinite_source);
+                            }
+                            Err(err) => {
+                                eprintln!("Failed to open file: {}", err);
+                            }
+                        }
+
+                    },
+
+                    "kill" => {
                         let dirs = DirData::new();
 
                         if metadata(&dirs.socket_path).is_ok() {
