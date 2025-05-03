@@ -1,5 +1,7 @@
 use crate::{
-    update_currently_playing, AudioManager, DirData
+    update_currently_playing,
+    AudioManager,
+    DirData
 };
 use daemonize::Daemonize;
 use rodio::{
@@ -61,10 +63,7 @@ pub fn start_socket() -> Result<UnixListener> {
     Ok(listener)
 }
 
-pub fn socket_manager(
-    listener: UnixListener,
-    audio_manager: &mut AudioManager,
-) -> Result<()> {
+pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager ) -> Result<()> {
     if !audio_manager.track.is_empty() {
         match File::open(&audio_manager.track) {
             Ok(song) => {
@@ -106,11 +105,14 @@ pub fn socket_manager(
                             }
                         }
                     },
+
                     cmd if cmd.starts_with("change_track ") => {
                         let new_track = cmd.strip_prefix("change_track ").unwrap();
+
                         if let Ok(song) = File::open(new_track) {
                             audio_manager.sink.stop();
                             let source = Decoder::new(BufReader::new(song)).unwrap();
+
                             audio_manager.sink.append(source);
                             audio_manager.track = new_track.to_string();
                             update_currently_playing(new_track);
@@ -118,6 +120,7 @@ pub fn socket_manager(
                             eprintln!("Failed to open file: {}", new_track);
                         }
                     },
+
                     "toggle_play" => {
                         if audio_manager.sink.is_paused() {
                             audio_manager.sink.play();
@@ -125,12 +128,14 @@ pub fn socket_manager(
                             audio_manager.sink.pause();
                         }
                     },
+
                     "make_infinite" => {
                         match File::open(&audio_manager.track) {
                             Ok(song) => {
                                 let source = Decoder::new(BufReader::new(song)).unwrap();
                                 let infinite_source = source.repeat_infinite();
                                 audio_manager.sink.append(infinite_source);
+                                update_currently_playing(&audio_manager.track);
                             }
                             Err(err) => {
                                 eprintln!("Failed to open file: {}", err);
@@ -159,6 +164,7 @@ pub fn socket_manager(
                         }
 
                         audio_manager.sink.stop();
+                        update_currently_playing(&audio_manager.track);
                     },
                     _ => eprintln!("Unknown command"),
                 }
@@ -166,5 +172,6 @@ pub fn socket_manager(
             Err(err) => eprintln!("Connection failed: {}", err),
         }
     }
+
     Ok(())
 }

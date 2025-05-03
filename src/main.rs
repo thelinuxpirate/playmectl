@@ -20,8 +20,7 @@ use std::{
 // Add indexing crate
 // update mpd controls
 // add libnotify options
-// add manual queuing with -t & -c (rodio 'append')
-// -t can queue song & change song
+// -c can queue add detect playlists
 
 /// Plays songs in the background of your desktop
 #[derive(Parser, Debug)]

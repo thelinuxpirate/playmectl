@@ -30,6 +30,7 @@ impl AudioManager {
         AudioManager { track, _stream, sink, status }
     }
 
+    // testing function
     pub fn get_status(am: &Self) -> bool {
         if am.sink.empty() {
             true
@@ -37,6 +38,11 @@ impl AudioManager {
            false
         }
     }
+}
+
+pub struct Playlist {
+    path: PathBuf,
+
 }
 
 pub struct DirData {
@@ -62,6 +68,7 @@ impl DirData {
         }
     }
 
+    // Playlist code
     pub fn filepath_exists(file_path: &str) -> Option<u8> {
         if let Ok(meta) = metadata(file_path) {
             if meta.is_file() {
