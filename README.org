@@ -10,12 +10,17 @@ A program to play a song in the background
 Usage: playme [OPTIONS] --title <TITLE>
 
 Options:
-  -t, --title <TITLE>    Filepath of track to play
-  -d, --doloop <DOLOOP>  Control loop setting [default: 0]
-  -h, --help             Print help
-  -V, --version          Print version
+  -t, --title <TITLE>        Filepath of a track, playlist, or directory
+  -c, --command <COMMAND>    append, toggle, kill, loop, next, queue, previous,
+                             pause, or play [default: append]
+  -n, --notify               Send desktop notifications for track changes
+  -v, --view                 View the currently playing track
+  -h, --help                 Print help
+  -V, --version              Print version
 -----------------------------------------------------------
 # Example:
-$ playme -t ~/.local/audio/StickerbushSymphony.mp3 -d 1 &
-playme: playing...
+$ playmectl -t ~/.local/audio/StickerbushSymphony.mp3 &
+$ playmectl -t ~/Music -c queue
+$ playmectl -c next
+$ playmectl -c toggle
 #+end_src

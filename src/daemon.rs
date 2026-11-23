@@ -1,33 +1,11 @@
-use crate::{
-    update_currently_playing,
-    AudioManager,
-    DirData
-};
+use crate::{notify_track, resolve_media_paths, update_currently_playing, AudioManager, DirData};
 use daemonize::Daemonize;
-use rodio::{
-    Decoder,
-    Source
-};
+use rodio::{Decoder, Source};
 use std::{
-    fs::{
-        create_dir_all,
-        read_to_string,
-        remove_file,
-        metadata,
-        File
-    },
-    io::{
-        ErrorKind,
-        BufReader,
-        Result,
-        Error,
-        Read
-    },
-    process::{
-        Command,
-        exit
-    },
-    os::unix::net::UnixListener
+    fs::{create_dir_all, metadata, read_to_string, remove_file, File},
+    io::{BufReader, Error, ErrorKind, Read, Result},
+    os::unix::net::UnixListener,
+    process::{exit, Command},
 };
 
 pub fn daemonize() {
@@ -63,7 +41,7 @@ pub fn start_socket() -> Result<UnixListener> {
     Ok(listener)
 }
 
-pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager ) -> Result<()> {
+pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager) -> Result<()> {
     if !audio_manager.track.is_empty() {
         match File::open(&audio_manager.track) {
             Ok(song) => {
@@ -71,6 +49,9 @@ pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager )
                 audio_manager.sink.append(source);
                 audio_manager.sink.play();
                 update_currently_playing(&audio_manager.track);
+                if audio_manager.notifications {
+                    notify_track(&audio_manager.track);
+                }
             }
             Err(err) => {
                 eprintln!("Failed to open file: {}", err);
@@ -81,7 +62,7 @@ pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager )
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let mut buffer = [0; 128];
+                let mut buffer = [0; 4096];
                 let size = stream.read(&mut buffer)?;
 
                 if size == 0 {
@@ -92,34 +73,86 @@ pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager )
                 println!("Received command: {}", message);
 
                 match message.as_str() {
-                    "append" => {
-                        match File::open(&audio_manager.track) {
-                            Ok(song) => {
-                                let source = Decoder::new(BufReader::new(song)).unwrap();
-                                audio_manager.sink.append(source);
-                                audio_manager.sink.play();
-                                update_currently_playing(&audio_manager.track);
+                    "append" => match File::open(&audio_manager.track) {
+                        Ok(song) => {
+                            let source = Decoder::new(BufReader::new(song)).unwrap();
+                            audio_manager.sink.append(source);
+                            audio_manager.sink.play();
+                            update_currently_playing(&audio_manager.track);
+                            if audio_manager.notifications {
+                                notify_track(&audio_manager.track);
                             }
-                            Err(err) => {
-                                eprintln!("Failed to open file: {}", err);
-                            }
+                        }
+                        Err(err) => {
+                            eprintln!("Failed to open file: {}", err);
                         }
                     },
 
                     cmd if cmd.starts_with("change_track ") => {
                         let new_track = cmd.strip_prefix("change_track ").unwrap();
-
-                        if let Ok(song) = File::open(new_track) {
-                            audio_manager.sink.stop();
-                            let source = Decoder::new(BufReader::new(song)).unwrap();
-
-                            audio_manager.sink.append(source);
-                            audio_manager.track = new_track.to_string();
-                            update_currently_playing(new_track);
+                        let mut tracks = resolve_media_paths(new_track);
+                        if let Some(track) = tracks.pop_front() {
+                            if let Ok(song) = File::open(&track) {
+                                audio_manager.history.push_back(audio_manager.track.clone());
+                                audio_manager.sink.stop();
+                                let source = Decoder::new(BufReader::new(song)).unwrap();
+                                audio_manager.sink.append(source);
+                                audio_manager.track = track.clone();
+                                audio_manager.queue = tracks;
+                                update_currently_playing(&track);
+                                if audio_manager.notifications {
+                                    notify_track(&track);
+                                }
+                            } else {
+                                eprintln!("Failed to open file: {}", track);
+                            }
                         } else {
-                            eprintln!("Failed to open file: {}", new_track);
+                            eprintln!("Track or playlist not found: {}", new_track);
                         }
-                    },
+                    }
+
+                    cmd if cmd.starts_with("queue_track ") => {
+                        let input = cmd.strip_prefix("queue_track ").unwrap();
+                        for track in resolve_media_paths(input) {
+                            audio_manager.queue.push_back(track);
+                        }
+                    }
+
+                    "next_track" => {
+                        if let Some(track) = audio_manager.queue.pop_front() {
+                            if let Ok(song) = File::open(&track) {
+                                audio_manager.history.push_back(audio_manager.track.clone());
+                                audio_manager.sink.stop();
+                                let source = Decoder::new(BufReader::new(song)).unwrap();
+                                audio_manager.sink.append(source);
+                                audio_manager.track = track.clone();
+                                update_currently_playing(&track);
+                                if audio_manager.notifications {
+                                    notify_track(&track);
+                                }
+                            }
+                        } else {
+                            eprintln!("The queue is empty.");
+                        }
+                    }
+
+                    "previous_track" => {
+                        if let Some(track) = audio_manager.history.pop_back() {
+                            if let Ok(song) = File::open(&track) {
+                                audio_manager.queue.push_front(audio_manager.track.clone());
+                                audio_manager.sink.stop();
+                                let source = Decoder::new(BufReader::new(song)).unwrap();
+                                audio_manager.sink.append(source);
+                                audio_manager.track = track.clone();
+                                update_currently_playing(&track);
+                                if audio_manager.notifications {
+                                    notify_track(&track);
+                                }
+                            }
+                        } else {
+                            eprintln!("There is no previous track.");
+                        }
+                    }
 
                     "toggle_play" => {
                         if audio_manager.sink.is_paused() {
@@ -127,21 +160,19 @@ pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager )
                         } else {
                             audio_manager.sink.pause();
                         }
-                    },
+                    }
 
-                    "make_infinite" => {
-                        match File::open(&audio_manager.track) {
-                            Ok(song) => {
-                                let source = Decoder::new(BufReader::new(song)).unwrap();
-                                let infinite_source = source.repeat_infinite();
-                                audio_manager.sink.append(infinite_source);
-                                update_currently_playing(&audio_manager.track);
-                            }
-                            Err(err) => {
-                                eprintln!("Failed to open file: {}", err);
-                            }
+                    "make_infinite" => match File::open(&audio_manager.track) {
+                        Ok(song) => {
+                            audio_manager.sink.stop();
+                            let source = Decoder::new(BufReader::new(song)).unwrap();
+                            let infinite_source = source.repeat_infinite();
+                            audio_manager.sink.append(infinite_source);
+                            update_currently_playing(&audio_manager.track);
                         }
-
+                        Err(err) => {
+                            eprintln!("Failed to open file: {}", err);
+                        }
                     },
 
                     "kill" => {
@@ -165,7 +196,9 @@ pub fn socket_manager(listener: UnixListener, audio_manager: &mut AudioManager )
 
                         audio_manager.sink.stop();
                         update_currently_playing(&audio_manager.track);
-                    },
+                    }
+                    "pause" => audio_manager.sink.pause(),
+                    "play" => audio_manager.sink.play(),
                     _ => eprintln!("Unknown command"),
                 }
             }

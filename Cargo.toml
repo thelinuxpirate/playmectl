@@ -8,5 +8,7 @@ edition = "2021"
 clap  = { version = "4.5.1", features = [ "derive" ] }
 daemonize = "0.5.0"
 rodio = { version = "0.20.1", features = [ "noise", "tracing" ] }
+walkdir = "2.5"
+notify-rust = "4"
 # might not need a config
 #toml  = "0.8.19"
