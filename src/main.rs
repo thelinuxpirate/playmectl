@@ -1,26 +1,9 @@
 use clap::Parser;
 use playmectl::{
-    daemon::{
-        daemonize,
-        start_socket,
-        socket_manager
-    },
-    get_currently_playing,
-    AudioManager,
-    DirData
+    daemon::{daemonize, socket_manager, start_socket},
+    get_currently_playing, AudioManager, DirData,
 };
-use std::{
-    os::unix::net::UnixStream,
-    process::exit,
-    io::Write,
-};
-
-// TODO:
-// Add playlist feature
-// Add indexing crate
-// update mpd controls
-// add libnotify options
-// -c can queue add detect playlists
+use std::{io::Write, os::unix::net::UnixStream, process::exit};
 
 /// Plays songs in the background of your desktop
 #[derive(Parser, Debug)]
@@ -31,12 +14,16 @@ pub struct Args {
     title: String,
 
     /// 1 = play/pause, 2 = kill, 3 = loop,  4 = Change song, 5 = Queue song
-    #[arg(short, long, default_value_t = 0)]
-    command: u8,
+    #[arg(short, long, default_value = "append")]
+    command: String,
 
     /// View currently playing song
     #[arg(short, long)]
     view: bool,
+
+    /// Send desktop notifications when tracks change
+    #[arg(short = 'n', long)]
+    notify: bool,
 }
 
 fn send_cmd(command: &str) {
@@ -67,14 +54,24 @@ fn main() {
 
     if dirs.socket_path.exists() {
         if !args.title.is_empty() {
-            send_cmd(&format!("change_track {}", args.title));
+            let command = match args.command.as_str() {
+                "5" | "queue" | "queue_track" => "queue_track",
+                _ => "change_track",
+            };
+            send_cmd(&format!("{} {}", command, args.title));
+            return;
         }
 
-        match args.command {
-            0 => send_cmd("append"),
-            1 => send_cmd("toggle_play"),
-            2 => send_cmd("kill"),
-            3 => send_cmd("make_infinite"),
+        match args.command.as_str() {
+            "0" | "append" => send_cmd("append"),
+            "1" | "toggle" | "play_pause" => send_cmd("toggle_play"),
+            "2" | "kill" | "stop" => send_cmd("kill"),
+            "3" | "loop" | "infinite" => send_cmd("make_infinite"),
+            "4" | "next" => send_cmd("next_track"),
+            "5" | "queue" | "queue_track" if args.title.is_empty() => send_cmd("queue_track "),
+            "6" | "previous" | "prev" => send_cmd("previous_track"),
+            "7" | "pause" => send_cmd("pause"),
+            "8" | "play" => send_cmd("play"),
             _ => eprintln!("Unknown command."),
         }
         return;
@@ -82,7 +79,7 @@ fn main() {
 
     if !args.title.is_empty() {
         daemonize();
-        let mut audio_manager = AudioManager::new(args.title);
+        let mut audio_manager = AudioManager::new_with_options(args.title, args.notify);
 
         match start_socket() {
             Ok(listener) => {
